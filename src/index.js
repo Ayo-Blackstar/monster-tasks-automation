@@ -1,5 +1,3 @@
-// v1.0
-
 require('dotenv').config();
 const express = require('express');
 const app = express();
