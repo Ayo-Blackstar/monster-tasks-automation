@@ -90,14 +90,18 @@ function determineLeadTier(answers, fields_def) {
     // Monthly revenue check
     if (fieldTitle.includes('monthly business revenue') || fieldTitle.includes('average monthly')) {
       monthlyRevenue = value;
-      // Check for high revenue indicators
+
+      // Extract numeric value - handles $15,000 or $15k etc
+      const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
+
       if (
-        valueLower.includes('$10k') || valueLower.includes('10,000') ||
+        numericValue >= 10000 ||
+        valueLower.includes('$10k') || valueLower.includes('10k+') ||
         valueLower.includes('$15k') || valueLower.includes('$20k') ||
         valueLower.includes('$25k') || valueLower.includes('$30k') ||
         valueLower.includes('$50k') || valueLower.includes('$100k') ||
-        valueLower.includes('10k+') || valueLower.includes('above $10') ||
-        valueLower.includes('over $10') || valueLower.includes('more than $10')
+        valueLower.includes('above $10') || valueLower.includes('over $10') ||
+        valueLower.includes('more than $10')
       ) {
         hasHighRevenue = true;
       }
@@ -350,18 +354,9 @@ router.post('/webhook', async (req, res) => {
         }
       }
 
-      // Add booking link to Discord fields
-      if (calendlyValue) {
-        discordFields.push({
-          name: 'Call Booking',
-          value: String(calendlyValue).substring(0, 1024),
-          inline: true
-        });
-      }
-
-      // Send new lead to Discord (without booking link shown separately)
+      // Send new lead to Discord without booking link
       const newLeadTitle = `${prefix} New Lead - ${price}`;
-      const newLeadEmbed = createEmbed(newLeadTitle, discordFields.filter(f => f.name !== 'Call Booking'), color);
+      const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
 
     } else {
