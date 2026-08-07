@@ -60,6 +60,9 @@ function determineLeadTier(answers, fields_def) {
   let company = '';
   let monthlyRevenue = '';
   let problems = '';
+  let teamSize = '';
+  let hoursPerWeek = '';
+  let businessDependency = '';
 
   answers.forEach((answer, index) => {
     const fieldDef = fields_def[index];
@@ -86,6 +89,9 @@ function determineLeadTier(answers, fields_def) {
     if (fieldTitle.includes('first name')) firstName = value;
     if (fieldTitle.includes('last name')) lastName = value;
     if (fieldTitle.includes('company')) company = value;
+    if (fieldTitle.includes('how many people currently work')) teamSize = value;
+    if (fieldTitle.includes('how many hours each week')) hoursPerWeek = value;
+    if (fieldTitle.includes('where is the business most dependent')) businessDependency = value;
 
     // Monthly revenue check
     if (fieldTitle.includes('monthly business revenue') || fieldTitle.includes('average monthly')) {
@@ -126,11 +132,11 @@ function determineLeadTier(answers, fields_def) {
   });
 
   if (hasHighRevenue && hasInvestment) {
-    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems };
+    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else if (hasInvestment) {
-    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems };
+    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else {
-    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', price: '$1,997', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems };
+    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', price: '$1,997', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   }
 }
 
@@ -242,7 +248,7 @@ router.post('/webhook', async (req, res) => {
     const hidden = payload.form_response?.hidden || {};
 
     const tierData = determineLeadTier(answers, fields_def);
-    const { color, prefix, price, firstName, lastName, email, phone, company, tier } = tierData;
+    const { color, prefix, price, firstName, lastName, email, phone, company, tier, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency } = tierData;
 
     if (!email && !phone && !firstName) {
       return res.json({ success: true, skipped: 'no contact info' });
@@ -330,6 +336,14 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
+    // Build custom fields for GHL contact
+    const customFields = [];
+    if (monthlyRevenue) customFields.push({ id: 'gsMF4d6KKOjoxo7t4KwB', value: monthlyRevenue });
+    if (problems) customFields.push({ id: '2iUPlFtQBHj59EORVWHM', value: problems });
+    if (teamSize) customFields.push({ id: 'kVehP7Paep36dS94d5f9', value: teamSize });
+    if (hoursPerWeek) customFields.push({ id: 'SyFFXP2cKAMDbbp3HfvM', value: hoursPerWeek });
+    if (businessDependency) customFields.push({ id: 'ovJsFnaGKlgh00T3qf1s', value: businessDependency });
+
     // Always create GHL contact
     const contact = await createGHLContact({
       firstName,
@@ -340,6 +354,7 @@ router.post('/webhook', async (req, res) => {
       locationId: process.env.GHL_LOCATION_ID,
       source: 'typeform',
       tags: ['typeform-lead', `${tier}-lead`],
+      customFields,
     });
 
     if (hasCalendly) {
