@@ -4,7 +4,7 @@ const { sendDiscordMessage, createEmbed, COLORS } = require('../utils/discord');
 const axios = require('axios');
 
 const processedEmails = new Map();
-const DEDUP_WINDOW_MS = 5 * 60 * 1000;
+const DEDUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 function isDuplicateEmail(email) {
   if (!email) return false;
@@ -96,18 +96,15 @@ function determineLeadTier(answers, fields_def) {
     // Monthly revenue check
     if (fieldTitle.includes('monthly business revenue') || fieldTitle.includes('average monthly')) {
       monthlyRevenue = value;
-
-      // Extract numeric value - handles $15,000 or $15k etc
       const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
-
       if (
         numericValue >= 10000 ||
         valueLower.includes('$10k') || valueLower.includes('10k+') ||
         valueLower.includes('$15k') || valueLower.includes('$20k') ||
         valueLower.includes('$25k') || valueLower.includes('$30k') ||
         valueLower.includes('$50k') || valueLower.includes('$100k') ||
-        valueLower.includes('above $10') || valueLower.includes('over $10') ||
-        valueLower.includes('more than $10')
+        valueLower.includes('10-25k') || valueLower.includes('above $10') ||
+        valueLower.includes('over $10') || valueLower.includes('more than $10')
       ) {
         hasHighRevenue = true;
       }
@@ -125,9 +122,11 @@ function determineLeadTier(answers, fields_def) {
       }
     }
 
-    // Problems field
+    // Problems field - skip if it's just the hint text
     if (fieldTitle.includes('problems') || fieldTitle.includes('bottlenecks')) {
-      problems = value;
+      if (value && !value.toLowerCase().includes('we use your responses')) {
+        problems = value;
+      }
     }
   });
 
@@ -316,6 +315,9 @@ router.post('/webhook', async (req, res) => {
           }
       }
 
+      // Skip hint text in problems field
+      if (value && value.toLowerCase().includes('we use your responses')) return;
+
       if (value) {
         discordFields.push({
           name: fieldTitle.substring(0, 256),
@@ -369,13 +371,13 @@ router.post('/webhook', async (req, res) => {
         }
       }
 
-      // Send new lead to Discord without booking link
+      // Send new lead to Discord
       const newLeadTitle = `${prefix} New Lead - ${price}`;
       const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
 
     } else {
-      // New lead only
+      // New lead only - deduplicate
       if (!isDuplicateEmail(email) && contact?.id) {
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
 
