@@ -4,7 +4,7 @@ const { sendDiscordMessage, createEmbed, COLORS } = require('../utils/discord');
 const axios = require('axios');
 
 const processedEmails = new Map();
-const DEDUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
 function isDuplicateEmail(email) {
   if (!email) return false;
@@ -93,7 +93,6 @@ function determineLeadTier(answers, fields_def) {
     if (fieldTitle.includes('how many hours each week')) hoursPerWeek = value;
     if (fieldTitle.includes('where is the business most dependent')) businessDependency = value;
 
-    // Monthly revenue check
     if (fieldTitle.includes('monthly business revenue') || fieldTitle.includes('average monthly')) {
       monthlyRevenue = value;
       const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
@@ -103,14 +102,14 @@ function determineLeadTier(answers, fields_def) {
         valueLower.includes('$15k') || valueLower.includes('$20k') ||
         valueLower.includes('$25k') || valueLower.includes('$30k') ||
         valueLower.includes('$50k') || valueLower.includes('$100k') ||
-        valueLower.includes('10-25k') || valueLower.includes('above $10') ||
-        valueLower.includes('over $10') || valueLower.includes('more than $10')
+        valueLower.includes('10-25k') || valueLower.includes('25-49k') ||
+        valueLower.includes('above $10') || valueLower.includes('over $10') ||
+        valueLower.includes('more than $10')
       ) {
         hasHighRevenue = true;
       }
     }
 
-    // Investment check
     if (fieldTitle.includes('investment') || fieldTitle.includes('$1997') || fieldTitle.includes('1997')) {
       if (
         valueLower.includes('yes') ||
@@ -122,7 +121,6 @@ function determineLeadTier(answers, fields_def) {
       }
     }
 
-    // Problems field - skip if it's just the hint text
     if (fieldTitle.includes('problems') || fieldTitle.includes('bottlenecks')) {
       if (value && !value.toLowerCase().includes('we use your responses')) {
         problems = value;
@@ -131,11 +129,11 @@ function determineLeadTier(answers, fields_def) {
   });
 
   if (hasHighRevenue && hasInvestment) {
-    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else if (hasInvestment) {
-    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', price: '$1,997', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else {
-    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', price: '$1,997', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   }
 }
 
@@ -247,7 +245,7 @@ router.post('/webhook', async (req, res) => {
     const hidden = payload.form_response?.hidden || {};
 
     const tierData = determineLeadTier(answers, fields_def);
-    const { color, prefix, price, firstName, lastName, email, phone, company, tier, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency } = tierData;
+    const { color, prefix, label, firstName, lastName, email, phone, company, tier, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency } = tierData;
 
     if (!email && !phone && !firstName) {
       return res.json({ success: true, skipped: 'no contact info' });
@@ -315,7 +313,7 @@ router.post('/webhook', async (req, res) => {
           }
       }
 
-      // Skip hint text in problems field
+      // Skip hint text
       if (value && value.toLowerCase().includes('we use your responses')) return;
 
       if (value) {
@@ -360,7 +358,6 @@ router.post('/webhook', async (req, res) => {
     });
 
     if (hasCalendly) {
-      // Move opportunity to Appointment Booked
       if (contact?.id) {
         const existing = await findAndUpdateOpportunityStage(
           contact.id,
@@ -372,16 +369,15 @@ router.post('/webhook', async (req, res) => {
       }
 
       // Send new lead to Discord
-      const newLeadTitle = `${prefix} New Lead - ${price}`;
+      const newLeadTitle = `${prefix} New Lead - ${label}`;
       const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
 
     } else {
-      // New lead only - deduplicate
       if (!isDuplicateEmail(email) && contact?.id) {
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
 
-        const newLeadTitle = `${prefix} New Lead - ${price}`;
+        const newLeadTitle = `${prefix} New Lead - ${label}`;
         const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
         await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
       }
