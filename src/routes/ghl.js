@@ -29,14 +29,13 @@ function getContactGHLLink(contactId) {
 
 function determineLeadColor(body) {
   const tags = (body.tags || '').toLowerCase();
-  const leadValue = parseFloat(body.opportunity_value || body.lead_value || '0');
 
-  if (tags.includes('gold-lead') || leadValue >= 1997) {
-    return { color: COLORS.GOLD, prefix: '🥇', price: '$1,997' };
-  } else if (tags.includes('green-lead')) {
-    return { color: COLORS.GREEN, prefix: '🟢', price: '$1,997' };
+  if (tags.includes('gold-lead')) {
+    return { color: COLORS.GOLD, prefix: '🥇', label: 'QUALIFIED' };
+  } else if (tags.includes('green-lead') || tags.includes('typeform-lead')) {
+    return { color: COLORS.GREEN, prefix: '🟢', label: 'SELF-BOOKED' };
   }
-  return { color: COLORS.BLUE, prefix: '📞', price: '$1,997' };
+  return { color: COLORS.BLUE, prefix: '📞', label: 'SETTER-BOOKED' };
 }
 
 async function fetchGHLContact(contactId) {
@@ -145,8 +144,8 @@ router.post('/booked-call', async (req, res) => {
     const fullContact = contactId ? await fetchGHLContact(contactId) : null;
     const mergedBody = mergeContactData(req.body, fullContact);
 
-    const { color, prefix, price } = determineLeadColor(mergedBody);
-    const embed = createEmbed(`${prefix} New Call Booked - ${price}`, buildCallFields(mergedBody, 'Call Booked'), color);
+    const { color, prefix, label } = determineLeadColor(mergedBody);
+    const embed = createEmbed(`${prefix} New Call Booked - ${label}`, buildCallFields(mergedBody, 'Call Booked'), color);
     await sendDiscordMessage(process.env.DISCORD_WEBHOOK_BOOKED_CALLS, embed);
     res.json({ success: true });
   } catch (err) {
@@ -246,26 +245,32 @@ router.post('/closed-deal', async (req, res) => {
     const dedupKey = `closed-${contactId}`;
     if (isDuplicate(dedupKey)) return res.json({ success: true, skipped: 'duplicate' });
 
-    const contactName = req.body.contact_name || req.body.full_name ||
-      `${req.body.first_name || ''} ${req.body.last_name || ''}`.trim() || 'Unknown';
+    // Fetch full contact for closed deal too
+    const fullContact = contactId ? await fetchGHLContact(contactId) : null;
+    const mergedBody = mergeContactData(req.body, fullContact);
+    const contactName = mergedBody.contact_name || mergedBody.full_name ||
+      `${mergedBody.first_name || ''} ${mergedBody.last_name || ''}`.trim() || 'Unknown';
     const ghlLink = getContactGHLLink(contactId);
 
     const fields = [
       { name: 'Stage', value: 'Closed', inline: true },
       { name: 'Name', value: `[${contactName}](${ghlLink})`, inline: true },
-      { name: 'Email', value: req.body.email || '', inline: true },
-      { name: 'Phone', value: req.body.phone || '', inline: true },
+      { name: 'Email', value: mergedBody.email || '', inline: true },
+      { name: 'Phone', value: mergedBody.phone || '', inline: true },
       { name: 'Full_name', value: contactName, inline: true },
-      { name: 'Company', value: req.body.company_name || req.body.company || '', inline: true },
-      { name: 'Tags', value: req.body.tags || '', inline: true },
-      { name: 'Country', value: req.body.country || '', inline: true },
-      { name: 'Timezone', value: req.body.timezone || '', inline: true },
-      { name: 'Opportunity_name', value: req.body.opportunity_name || contactName, inline: true },
-      { name: 'Opportunity_value', value: req.body.opportunity_value || '', inline: true },
-      { name: 'Pipeline_name', value: req.body.pipeline_name || '', inline: true },
-      { name: 'Owner', value: req.body.assigned_user || '', inline: true },
-      { name: 'Notes', value: req.body.opportunity_notes || '', inline: false },
+      { name: 'Company', value: mergedBody.company_name || mergedBody.company || '', inline: true },
+      { name: 'Tags', value: mergedBody.tags || '', inline: true },
+      { name: 'Country', value: mergedBody.country || '', inline: true },
+      { name: 'Timezone', value: mergedBody.timezone || '', inline: true },
+      { name: 'Opportunity_name', value: mergedBody.opportunity_name || contactName, inline: true },
+      { name: 'Opportunity_value', value: mergedBody.opportunity_value || '', inline: true },
+      { name: 'Pipeline_name', value: mergedBody.pipeline_name || '', inline: true },
+      { name: 'Owner', value: mergedBody.assigned_user || '', inline: true },
+      { name: 'Notes', value: mergedBody.opportunity_notes || '', inline: false },
     ];
+
+    if (mergedBody.monthly_revenue) fields.push({ name: 'Monthly Revenue', value: mergedBody.monthly_revenue, inline: true });
+    if (mergedBody.problems) fields.push({ name: 'Problems & Bottlenecks', value: String(mergedBody.problems).substring(0, 1024), inline: false });
 
     const embed = createEmbed('🏆 Pipeline: Closed Deal', fields, COLORS.GOLD);
     await sendDiscordMessage(process.env.DISCORD_WEBHOOK_CLOSED_DEAL, embed);
