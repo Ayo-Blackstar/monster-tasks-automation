@@ -112,9 +112,9 @@ function determineLeadTier(answers, fields_def) {
       }
     }
 
-    // Investment check - answer is simply Yes or No
+    // Investment check
     if (fieldTitle.includes('investment') || fieldTitle.includes('$1997') || fieldTitle.includes('1997')) {
-      if (valueLower === 'yes' || valueLower.includes('yes')) {
+      if (valueLower === 'yes' || valueLower.startsWith('yes')) {
         hasInvestment = true;
       }
     }
@@ -335,10 +335,10 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
-    // Build custom fields for GHL contact
+    // Build custom fields with correct GHL field IDs
     const customFields = [];
-    if (monthlyRevenue) customFields.push({ id: 'gsMF4d6KKOjoxo7t4KwB', value: monthlyRevenue });
-    if (problems) customFields.push({ id: '2iUPlFtQBHj59EORVWHM', value: problems });
+    if (monthlyRevenue) customFields.push({ id: 'GaQiLwtPxc6njW9rTCon', value: monthlyRevenue });
+    if (problems) customFields.push({ id: 'JPXxY4jPWMzT8v7WTd9K', value: problems });
     if (teamSize) customFields.push({ id: 'kVehP7Paep36dS94d5f9', value: teamSize });
     if (hoursPerWeek) customFields.push({ id: 'SyFFXP2cKAMDbbp3HfvM', value: hoursPerWeek });
     if (businessDependency) customFields.push({ id: 'ovJsFnaGKlgh00T3qf1s', value: businessDependency });
@@ -357,7 +357,7 @@ router.post('/webhook', async (req, res) => {
     });
 
     if (hasCalendly) {
-      // Full form with booking — move opportunity to Appointment Booked
+      // Full form with booking
       if (contact?.id) {
         const existing = await findAndUpdateOpportunityStage(
           contact.id,
@@ -368,14 +368,13 @@ router.post('/webhook', async (req, res) => {
         }
       }
 
-      // Always send new lead with FULL details when booking present
-      // Override dedup — full submission has complete qualification data
+      // Always send full new lead notification when booking present
       const newLeadTitle = `${prefix} New Lead - ${label}`;
       const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
 
     } else {
-      // Partial submission — new lead only, deduplicate
+      // Partial submission — deduplicate
       if (!isDuplicateEmail(email) && contact?.id) {
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
 
