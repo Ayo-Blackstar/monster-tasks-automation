@@ -68,8 +68,8 @@ function mergeContactData(body, fullContact) {
 
   const customFields = fullContact.customFields || [];
   customFields.forEach(f => {
-    if (f.id === 'gsMF4d6KKOjoxo7t4KwB') merged.monthly_revenue = f.value;
-    if (f.id === '2iUPlFtQBHj59EORVWHM') merged.problems = f.value;
+    if (f.id === 'GaQiLwtPxc6njW9rTCon') merged.monthly_revenue = f.value;
+    if (f.id === 'JPXxY4jPWMzT8v7WTd9K') merged.problems = f.value;
     if (f.id === 'kVehP7Paep36dS94d5f9') merged.team_size = f.value;
     if (f.id === 'SyFFXP2cKAMDbbp3HfvM') merged.hours_per_week = f.value;
     if (f.id === 'ovJsFnaGKlgh00T3qf1s') merged.business_dependency = f.value;
@@ -140,7 +140,6 @@ router.post('/booked-call', async (req, res) => {
     const dedupKey = `booked-${contactId}-${req.body.email || ''}`;
     if (isDuplicate(dedupKey)) return res.json({ success: true, skipped: 'duplicate' });
 
-    // Fetch full contact to get all custom fields
     const fullContact = contactId ? await fetchGHLContact(contactId) : null;
     const mergedBody = mergeContactData(req.body, fullContact);
 
@@ -245,7 +244,6 @@ router.post('/closed-deal', async (req, res) => {
     const dedupKey = `closed-${contactId}`;
     if (isDuplicate(dedupKey)) return res.json({ success: true, skipped: 'duplicate' });
 
-    // Fetch full contact for closed deal too
     const fullContact = contactId ? await fetchGHLContact(contactId) : null;
     const mergedBody = mergeContactData(req.body, fullContact);
     const contactName = mergedBody.contact_name || mergedBody.full_name ||
