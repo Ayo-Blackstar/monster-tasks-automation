@@ -78,6 +78,34 @@ function mergeContactData(body, fullContact) {
   return merged;
 }
 
+function buildNewLeadFields(body) {
+  const contactId = body.contact_id || body.contactId || '';
+  const contactName = body.contact_name || body.full_name ||
+    `${body.first_name || ''} ${body.last_name || ''}`.trim() || 'Unknown';
+  const ghlLink = getContactGHLLink(contactId);
+  const now = new Date().toLocaleDateString('en-GB');
+
+  const fields = [
+    { name: 'Time', value: now, inline: true },
+    { name: 'Name', value: `[${contactName}](${ghlLink})`, inline: true },
+    { name: 'Email', value: body.email || '', inline: true },
+    { name: 'Phone', value: body.phone || '', inline: true },
+    { name: 'Company', value: body.company_name || body.company || '', inline: true },
+    { name: 'Contact_source', value: body.contact_source || 'Facebook', inline: true },
+    { name: 'Country', value: body.country || '', inline: true },
+    { name: 'Timezone', value: body.timezone || '', inline: true },
+    { name: 'Tags', value: body.tags || '', inline: true },
+  ];
+
+  if (body.monthly_revenue) fields.push({ name: 'Monthly Revenue', value: body.monthly_revenue, inline: true });
+  if (body.team_size) fields.push({ name: 'Team Size', value: body.team_size, inline: true });
+  if (body.hours_per_week) fields.push({ name: 'Hours Delegatable', value: body.hours_per_week, inline: true });
+  if (body.business_dependency) fields.push({ name: 'Business Dependency', value: body.business_dependency, inline: true });
+  if (body.problems) fields.push({ name: 'Problems & Bottlenecks', value: String(body.problems).substring(0, 1024), inline: false });
+
+  return fields;
+}
+
 function buildCallFields(body, stage) {
   const contactId = body.contact_id || body.contactId || '';
   const contactName = body.contact_name || body.full_name ||
@@ -133,6 +161,23 @@ function buildStageFields(body, stage) {
     { name: 'Owner', value: body.assigned_user || '', inline: true },
   ];
 }
+
+router.post('/new-lead', async (req, res) => {
+  try {
+    const contactId = req.body.contact_id || req.body.contactId || '';
+    const dedupKey = `newlead-${contactId}-${req.body.email || ''}`;
+    if (isDuplicate(dedupKey)) return res.json({ success: true, skipped: 'duplicate' });
+
+    const fullContact = contactId ? await fetchGHLContact(contactId) : null;
+    const mergedBody = mergeContactData(req.body, fullContact);
+
+    const embed = createEmbed('🆕 New Lead', buildNewLeadFields(mergedBody), COLORS.BLUE);
+    await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, embed);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/booked-call', async (req, res) => {
   try {
