@@ -38,7 +38,7 @@ function abbreviateTitle(title) {
     'what is your average monthly business revenue': 'Monthly Revenue',
     'what is your monthly revenue': 'Monthly Revenue',
     'how long have you been in business': 'Time in Business',
-    'the investment for our program': 'Investment',
+    'the investment': 'Investment',
     'what are your current problems': 'Problems & Bottlenecks',
     'now book in a time': 'Call Booking',
     'what type of business': 'Business Type',
@@ -90,7 +90,7 @@ function determineLeadTier(answers, fields_def) {
     if (fieldTitle.includes('how many hours each week')) hoursPerWeek = value;
     if (fieldTitle.includes('where is the business most dependent')) businessDependency = value;
 
-    // Revenue check
+    // Revenue check — exact mapping to Typeform options
     if (
       fieldTitle.includes('monthly business revenue') ||
       fieldTitle.includes('average monthly') ||
@@ -99,28 +99,23 @@ function determineLeadTier(answers, fields_def) {
     ) {
       monthlyRevenue = value;
 
-      const numericMatch = value.replace(/[^0-9.]/g, '');
-      const numeric = parseFloat(numericMatch);
-      if (!isNaN(numeric)) revenueValue = numeric;
-
-      if (valueLower.includes('50k') || valueLower.includes('50,000') ||
-          valueLower.includes('$50k+') || valueLower.includes('above $50') ||
-          valueLower.includes('over $50') || valueLower.includes('100k') ||
-          valueLower.includes('200k') || valueLower.includes('500k')) {
+      if (
+        valueLower.includes('$100k+') || valueLower.includes('100k+') ||
+        valueLower.includes('100k') || valueLower.includes('$100')
+      ) {
+        revenueValue = 100000;
+      } else if (
+        valueLower.includes('$50-99') || valueLower.includes('50-99k') ||
+        valueLower.includes('50k')
+      ) {
         revenueValue = 50000;
       } else if (
-        valueLower.includes('10k') || valueLower.includes('10,000') ||
-        valueLower.includes('15k') || valueLower.includes('20k') ||
-        valueLower.includes('25k') || valueLower.includes('30k') ||
-        valueLower.includes('40k') || valueLower.includes('49k') ||
-        valueLower.includes('10-50') || valueLower.includes('10k-50') ||
-        valueLower.includes('$10k') || valueLower.includes('above $10')
+        valueLower.includes('$10-40') || valueLower.includes('10-40k') ||
+        valueLower.includes('10k')
       ) {
         revenueValue = 10000;
       } else if (
-        valueLower.includes('under $10') || valueLower.includes('below $10') ||
-        valueLower.includes('less than $10') || valueLower.includes('under 10k') ||
-        valueLower.includes('under $10k') || valueLower.includes('<$10')
+        valueLower.includes('under $10') || valueLower.includes('under $10k')
       ) {
         revenueValue = 0;
       }
@@ -133,6 +128,9 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
+  // 🥇 Gold = $50k+/month
+  // 🟢 Green = $10k–$50k/month
+  // 📞 Blue = below $10k/month
   if (revenueValue >= 50000) {
     return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else if (revenueValue >= 10000) {
@@ -383,10 +381,7 @@ router.post('/webhook', async (req, res) => {
 
     } else {
       if (!isDuplicateEmail(email) && contact?.id) {
-        // Update phone on partial too
-        if (phone) {
-          await updateGHLContact(contact.id, { phone });
-        }
+        if (phone) await updateGHLContact(contact.id, { phone });
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
 
         const title = `${prefix} New Lead - ${label}`;
