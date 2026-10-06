@@ -31,6 +31,7 @@ function abbreviateTitle(title) {
     'first name': 'First Name',
     'last name': 'Last Name',
     'phone number': 'Phone',
+    'phone': 'Phone',
     'email': 'Email',
     'company': 'Company',
     'where is the business most dependent': 'Business Dependency',
@@ -57,7 +58,6 @@ function isCalendlyBookingUrl(value) {
 
 function determineLeadTier(answers, fields_def) {
   let revenueValue = 0;
-  let revenueRaw = '';
   let firstName = '';
   let lastName = '';
   let email = '';
@@ -98,14 +98,11 @@ function determineLeadTier(answers, fields_def) {
       fieldTitle.includes('monthly business')
     ) {
       monthlyRevenue = value;
-      revenueRaw = valueLower;
 
-      // Extract numeric value
       const numericMatch = value.replace(/[^0-9.]/g, '');
       const numeric = parseFloat(numericMatch);
       if (!isNaN(numeric)) revenueValue = numeric;
 
-      // Parse range/label based options
       if (valueLower.includes('50k') || valueLower.includes('50,000') ||
           valueLower.includes('$50k+') || valueLower.includes('above $50') ||
           valueLower.includes('over $50') || valueLower.includes('100k') ||
@@ -129,7 +126,6 @@ function determineLeadTier(answers, fields_def) {
       }
     }
 
-    // Problems field
     if (fieldTitle.includes('problems') || fieldTitle.includes('bottlenecks')) {
       if (value && !value.toLowerCase().includes('we use your responses')) {
         problems = value;
@@ -137,10 +133,6 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  // Colour coding:
-  // 🥇 Gold = $50k+/month
-  // 🟢 Green = $10k–$50k/month
-  // 📞 Blue = below $10k/month
   if (revenueValue >= 50000) {
     return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else if (revenueValue >= 10000) {
@@ -172,6 +164,25 @@ async function createGHLContact(contactData) {
     }
     console.error('GHL contact error:', err.response?.status, JSON.stringify(err.response?.data));
     return null;
+  }
+}
+
+async function updateGHLContact(contactId, data) {
+  try {
+    await axios.put(
+      `https://services.leadconnectorhq.com/contacts/${contactId}`,
+      data,
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.GHL_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Version': '2021-07-28'
+        }
+      }
+    );
+    console.log('GHL contact updated:', contactId);
+  } catch (err) {
+    console.error('GHL contact update error:', err.response?.status, JSON.stringify(err.response?.data));
   }
 }
 
@@ -325,6 +336,7 @@ router.post('/webhook', async (req, res) => {
     if (hoursPerWeek) customFields.push({ id: 'SyFFXP2cKAMDbbp3HfvM', value: hoursPerWeek });
     if (businessDependency) customFields.push({ id: 'ovJsFnaGKlgh00T3qf1s', value: businessDependency });
 
+    // Create GHL contact
     const contact = await createGHLContact({
       firstName,
       lastName,
@@ -337,8 +349,8 @@ router.post('/webhook', async (req, res) => {
       customFields,
     });
 
+    // Add GHL contact link to Discord
     if (contact?.id) {
-      const { getContactGHLLink } = require('../utils/discord') || {};
       const locationId = process.env.GHL_LOCATION_ID;
       const ghlLink = `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contact.id}`;
       const fullName = `${firstName} ${lastName}`.trim() || email;
@@ -347,21 +359,36 @@ router.post('/webhook', async (req, res) => {
 
     if (hasCalendly) {
       if (contact?.id) {
+        // Update contact with typeform-booked tag AND phone
+        await updateGHLContact(contact.id, {
+          tags: ['typeform-lead', 'typeform-booked', `${tier}-lead`],
+          phone: phone || undefined,
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+        });
+
         const existing = await findAndUpdateOpportunityStage(contact.id, process.env.GHL_PIPELINE_BOOKED_STAGE_ID);
         if (!existing) {
           await createGHLOpportunity(contact, process.env.GHL_PIPELINE_BOOKED_STAGE_ID, tierData);
         }
       }
+
       if (calendlyValue) {
         discordFields.push({ name: 'Call Booking', value: String(calendlyValue).substring(0, 1024), inline: true });
       }
+
       const title = `${prefix} New Call Booked - ${label}`;
       const embed = createEmbed(title, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_BOOKED_CALLS, embed);
 
     } else {
       if (!isDuplicateEmail(email) && contact?.id) {
+        // Update phone on partial too
+        if (phone) {
+          await updateGHLContact(contact.id, { phone });
+        }
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
+
         const title = `${prefix} New Lead - ${label}`;
         const embed = createEmbed(title, discordFields, color);
         await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, embed);
