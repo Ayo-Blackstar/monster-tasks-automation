@@ -35,9 +35,14 @@ function abbreviateTitle(title) {
     'company': 'Company',
     'where is the business most dependent': 'Business Dependency',
     'what is your average monthly business revenue': 'Monthly Revenue',
+    'what is your monthly revenue': 'Monthly Revenue',
+    'how long have you been in business': 'Time in Business',
     'the investment for our program': 'Investment',
     'what are your current problems': 'Problems & Bottlenecks',
     'now book in a time': 'Call Booking',
+    'what type of business': 'Business Type',
+    'how many drivers': 'Number of Drivers',
+    'how many vehicles': 'Number of Vehicles',
   };
   const lower = title.toLowerCase();
   for (const [key, val] of Object.entries(map)) {
@@ -51,8 +56,8 @@ function isCalendlyBookingUrl(value) {
 }
 
 function determineLeadTier(answers, fields_def) {
-  let hasHighRevenue = false;
-  let hasInvestment = false;
+  let revenueValue = 0;
+  let revenueRaw = '';
   let firstName = '';
   let lastName = '';
   let email = '';
@@ -72,17 +77,9 @@ function determineLeadTier(answers, fields_def) {
     if (answer.type === 'choice') value = answer.choice?.label || '';
     else if (answer.type === 'choices') value = answer.choices?.labels?.join(', ') || '';
     else if (answer.type === 'text') value = answer.text || '';
-    else if (answer.type === 'email') {
-      value = answer.email || '';
-      email = value;
-    }
-    else if (answer.type === 'phone_number') {
-      value = answer.phone_number || '';
-      phone = value;
-    }
-    else if (answer.type === 'number') {
-      value = String(answer.number) || '';
-    }
+    else if (answer.type === 'email') { value = answer.email || ''; email = value; }
+    else if (answer.type === 'phone_number') { value = answer.phone_number || ''; phone = value; }
+    else if (answer.type === 'number') value = String(answer.number) || '';
 
     const valueLower = value.toLowerCase();
 
@@ -93,33 +90,46 @@ function determineLeadTier(answers, fields_def) {
     if (fieldTitle.includes('how many hours each week')) hoursPerWeek = value;
     if (fieldTitle.includes('where is the business most dependent')) businessDependency = value;
 
-    // Monthly revenue check
-    if (fieldTitle.includes('monthly business revenue') || fieldTitle.includes('average monthly')) {
+    // Revenue check
+    if (
+      fieldTitle.includes('monthly business revenue') ||
+      fieldTitle.includes('average monthly') ||
+      fieldTitle.includes('monthly revenue') ||
+      fieldTitle.includes('monthly business')
+    ) {
       monthlyRevenue = value;
-      const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
-      if (
-        numericValue >= 10000 ||
-        valueLower.includes('$10k') || valueLower.includes('10k+') ||
-        valueLower.includes('$15k') || valueLower.includes('$20k') ||
-        valueLower.includes('$25k') || valueLower.includes('$30k') ||
-        valueLower.includes('$50k') || valueLower.includes('$100k') ||
-        valueLower.includes('10-25k') || valueLower.includes('25-49k') ||
-        valueLower.includes('50-99k') || valueLower.includes('100k+') ||
-        valueLower.includes('above $10') || valueLower.includes('over $10') ||
-        valueLower.includes('more than $10')
+      revenueRaw = valueLower;
+
+      // Extract numeric value
+      const numericMatch = value.replace(/[^0-9.]/g, '');
+      const numeric = parseFloat(numericMatch);
+      if (!isNaN(numeric)) revenueValue = numeric;
+
+      // Parse range/label based options
+      if (valueLower.includes('50k') || valueLower.includes('50,000') ||
+          valueLower.includes('$50k+') || valueLower.includes('above $50') ||
+          valueLower.includes('over $50') || valueLower.includes('100k') ||
+          valueLower.includes('200k') || valueLower.includes('500k')) {
+        revenueValue = 50000;
+      } else if (
+        valueLower.includes('10k') || valueLower.includes('10,000') ||
+        valueLower.includes('15k') || valueLower.includes('20k') ||
+        valueLower.includes('25k') || valueLower.includes('30k') ||
+        valueLower.includes('40k') || valueLower.includes('49k') ||
+        valueLower.includes('10-50') || valueLower.includes('10k-50') ||
+        valueLower.includes('$10k') || valueLower.includes('above $10')
       ) {
-        hasHighRevenue = true;
+        revenueValue = 10000;
+      } else if (
+        valueLower.includes('under $10') || valueLower.includes('below $10') ||
+        valueLower.includes('less than $10') || valueLower.includes('under 10k') ||
+        valueLower.includes('under $10k') || valueLower.includes('<$10')
+      ) {
+        revenueValue = 0;
       }
     }
 
-    // Investment check
-    if (fieldTitle.includes('investment') || fieldTitle.includes('$1997') || fieldTitle.includes('1997')) {
-      if (valueLower === 'yes' || valueLower.startsWith('yes')) {
-        hasInvestment = true;
-      }
-    }
-
-    // Problems field - skip hint text
+    // Problems field
     if (fieldTitle.includes('problems') || fieldTitle.includes('bottlenecks')) {
       if (value && !value.toLowerCase().includes('we use your responses')) {
         problems = value;
@@ -127,9 +137,13 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  if (hasHighRevenue && hasInvestment) {
-    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
-  } else if (hasInvestment || hasHighRevenue) {
+  // Colour coding:
+  // 🥇 Gold = $50k+/month
+  // 🟢 Green = $10k–$50k/month
+  // 📞 Blue = below $10k/month
+  if (revenueValue >= 50000) {
+    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+  } else if (revenueValue >= 10000) {
     return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else {
     return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
@@ -165,9 +179,7 @@ async function createGHLOpportunity(contact, stageId, tierData) {
   try {
     const pipelineId = process.env.GHL_PIPELINE_ID;
     if (!pipelineId || !stageId || !contact?.id) return null;
-
     const name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'New Lead';
-
     const response = await axios.post(
       'https://services.leadconnectorhq.com/opportunities/',
       {
@@ -200,7 +212,6 @@ async function findAndUpdateOpportunityStage(contactId, stageId) {
   try {
     const pipelineId = process.env.GHL_PIPELINE_ID;
     if (!pipelineId || !stageId || !contactId) return null;
-
     const response = await axios.get(
       `https://services.leadconnectorhq.com/opportunities/search?location_id=${process.env.GHL_LOCATION_ID}&contact_id=${contactId}`,
       {
@@ -210,10 +221,8 @@ async function findAndUpdateOpportunityStage(contactId, stageId) {
         }
       }
     );
-
     const opportunities = response.data?.opportunities || [];
     const opportunity = opportunities.find(o => o.pipelineId === pipelineId);
-
     if (opportunity) {
       await axios.put(
         `https://services.leadconnectorhq.com/opportunities/${opportunity.id}`,
@@ -264,58 +273,32 @@ router.post('/webhook', async (req, res) => {
       let value = '';
 
       switch (answer.type) {
-        case 'text':
-          value = answer.text || '';
-          break;
-        case 'email':
-          value = answer.email || '';
-          break;
-        case 'phone_number':
-          value = answer.phone_number || '';
-          break;
-        case 'choice':
-          value = answer.choice?.label || '';
-          break;
-        case 'choices':
-          value = answer.choices?.labels?.join(', ') || '';
-          break;
-        case 'boolean':
-          value = answer.boolean ? 'Yes' : 'No';
-          break;
-        case 'number':
-          value = String(answer.number) || '';
-          break;
+        case 'text': value = answer.text || ''; break;
+        case 'email': value = answer.email || ''; break;
+        case 'phone_number': value = answer.phone_number || ''; break;
+        case 'choice': value = answer.choice?.label || ''; break;
+        case 'choices': value = answer.choices?.labels?.join(', ') || ''; break;
+        case 'boolean': value = answer.boolean ? 'Yes' : 'No'; break;
+        case 'number': value = String(answer.number) || ''; break;
         case 'calendly':
-          if (!hasCalendly) {
-            hasCalendly = true;
-            calendlyValue = answer.url || 'Call Booked ✅';
-          }
+          if (!hasCalendly) { hasCalendly = true; calendlyValue = answer.url || 'Call Booked ✅'; }
           return;
         case 'url':
           value = answer.url || '';
           if (isCalendlyBookingUrl(value)) {
-            if (!hasCalendly) {
-              hasCalendly = true;
-              calendlyValue = value;
-            }
+            if (!hasCalendly) { hasCalendly = true; calendlyValue = value; }
             return;
           }
           break;
         default:
           value = answer.url || answer.text || answer.email || '';
           if (isCalendlyBookingUrl(value)) {
-            if (!hasCalendly) {
-              hasCalendly = true;
-              calendlyValue = value;
-            }
+            if (!hasCalendly) { hasCalendly = true; calendlyValue = value; }
             return;
           }
       }
 
-      // Skip hint text
-      if (value && value.toLowerCase().includes('we use your responses')) return;
-
-      if (value) {
+      if (value && !value.toLowerCase().includes('we use your responses')) {
         discordFields.push({
           name: fieldTitle.substring(0, 256),
           value: String(value).substring(0, 1024),
@@ -324,10 +307,10 @@ router.post('/webhook', async (req, res) => {
       }
     });
 
-    // Add UTM data
+    // UTM data
     if (hidden && Object.keys(hidden).length > 0) {
       const utmLines = Object.entries(hidden)
-        .filter(([k, v]) => v)
+        .filter(([k, v]) => v && v !== 'hidden_value')
         .map(([k, v]) => `**${k}:** ${v}`)
         .join('\n');
       if (utmLines) {
@@ -335,7 +318,6 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
-    // Build custom fields with correct GHL field IDs
     const customFields = [];
     if (monthlyRevenue) customFields.push({ id: 'GaQiLwtPxc6njW9rTCon', value: monthlyRevenue });
     if (problems) customFields.push({ id: 'JPXxY4jPWMzT8v7WTd9K', value: problems });
@@ -343,7 +325,6 @@ router.post('/webhook', async (req, res) => {
     if (hoursPerWeek) customFields.push({ id: 'SyFFXP2cKAMDbbp3HfvM', value: hoursPerWeek });
     if (businessDependency) customFields.push({ id: 'ovJsFnaGKlgh00T3qf1s', value: businessDependency });
 
-    // Always create/update GHL contact
     const contact = await createGHLContact({
       firstName,
       lastName,
@@ -356,31 +337,34 @@ router.post('/webhook', async (req, res) => {
       customFields,
     });
 
+    if (contact?.id) {
+      const { getContactGHLLink } = require('../utils/discord') || {};
+      const locationId = process.env.GHL_LOCATION_ID;
+      const ghlLink = `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contact.id}`;
+      const fullName = `${firstName} ${lastName}`.trim() || email;
+      discordFields.splice(1, 0, { name: 'Contact', value: `[${fullName}](${ghlLink})`, inline: true });
+    }
+
     if (hasCalendly) {
-      // Full form with booking
       if (contact?.id) {
-        const existing = await findAndUpdateOpportunityStage(
-          contact.id,
-          process.env.GHL_PIPELINE_BOOKED_STAGE_ID
-        );
+        const existing = await findAndUpdateOpportunityStage(contact.id, process.env.GHL_PIPELINE_BOOKED_STAGE_ID);
         if (!existing) {
           await createGHLOpportunity(contact, process.env.GHL_PIPELINE_BOOKED_STAGE_ID, tierData);
         }
       }
-
-      // Always send full new lead notification when booking present
-      const newLeadTitle = `${prefix} New Lead - ${label}`;
-      const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
-      await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
+      if (calendlyValue) {
+        discordFields.push({ name: 'Call Booking', value: String(calendlyValue).substring(0, 1024), inline: true });
+      }
+      const title = `${prefix} New Call Booked - ${label}`;
+      const embed = createEmbed(title, discordFields, color);
+      await sendDiscordMessage(process.env.DISCORD_WEBHOOK_BOOKED_CALLS, embed);
 
     } else {
-      // Partial submission — deduplicate
       if (!isDuplicateEmail(email) && contact?.id) {
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
-
-        const newLeadTitle = `${prefix} New Lead - ${label}`;
-        const newLeadEmbed = createEmbed(newLeadTitle, discordFields, color);
-        await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, newLeadEmbed);
+        const title = `${prefix} New Lead - ${label}`;
+        const embed = createEmbed(title, discordFields, color);
+        await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, embed);
       }
     }
 
