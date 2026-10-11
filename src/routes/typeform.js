@@ -90,7 +90,6 @@ function determineLeadTier(answers, fields_def) {
     if (fieldTitle.includes('how many hours each week')) hoursPerWeek = value;
     if (fieldTitle.includes('where is the business most dependent')) businessDependency = value;
 
-    // Revenue check — exact mapping to Typeform options
     if (
       fieldTitle.includes('monthly business revenue') ||
       fieldTitle.includes('average monthly') ||
@@ -128,9 +127,6 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  // 🥇 Gold = $50k+/month
-  // 🟢 Green = $10k–$50k/month
-  // 📞 Blue = below $10k/month
   if (revenueValue >= 50000) {
     return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else if (revenueValue >= 10000) {
@@ -254,6 +250,42 @@ async function findAndUpdateOpportunityStage(contactId, stageId) {
   }
 }
 
+async function addGHLNote(contactId, noteText) {
+  try {
+    const headers = {
+      'Authorization': `Bearer ${process.env.GHL_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28'
+    };
+
+    // Add to contact notes
+    await axios.post(
+      `https://services.leadconnectorhq.com/contacts/${contactId}/notes`,
+      { body: noteText },
+      { headers }
+    );
+    console.log('Contact note added for:', contactId);
+
+    // Find opportunity and update notes
+    const oppResponse = await axios.get(
+      `https://services.leadconnectorhq.com/opportunities/search?location_id=${process.env.GHL_LOCATION_ID}&contact_id=${contactId}`,
+      { headers }
+    );
+    const opportunities = oppResponse.data?.opportunities || [];
+    const opportunity = opportunities.find(o => o.pipelineId === process.env.GHL_PIPELINE_ID) || opportunities[0];
+    if (opportunity) {
+      await axios.put(
+        `https://services.leadconnectorhq.com/opportunities/${opportunity.id}`,
+        { notes: noteText },
+        { headers }
+      );
+      console.log('Opportunity notes updated:', opportunity.id);
+    }
+  } catch (err) {
+    console.error('GHL note error:', err.response?.data || err.message);
+  }
+}
+
 router.post('/webhook', async (req, res) => {
   try {
     const payload = req.body;
@@ -271,6 +303,7 @@ router.post('/webhook', async (req, res) => {
     const discordFields = [];
     let hasCalendly = false;
     let calendlyValue = '';
+    const noteLines = ['📋 Monster Tasks Application:\n'];
 
     const now = new Date().toLocaleDateString('en-GB');
     discordFields.push({ name: 'Time', value: now, inline: true });
@@ -308,6 +341,7 @@ router.post('/webhook', async (req, res) => {
       }
 
       if (value && !value.toLowerCase().includes('we use your responses')) {
+        noteLines.push(`${fieldTitle}: ${value}`);
         discordFields.push({
           name: fieldTitle.substring(0, 256),
           value: String(value).substring(0, 1024),
@@ -324,8 +358,11 @@ router.post('/webhook', async (req, res) => {
         .join('\n');
       if (utmLines) {
         discordFields.push({ name: 'ATTRIBUTION', value: utmLines, inline: false });
+        noteLines.push(`\nUTM Attribution:\n${utmLines}`);
       }
     }
+
+    const noteText = noteLines.join('\n');
 
     const customFields = [];
     if (monthlyRevenue) customFields.push({ id: 'GaQiLwtPxc6njW9rTCon', value: monthlyRevenue });
@@ -357,7 +394,6 @@ router.post('/webhook', async (req, res) => {
 
     if (hasCalendly) {
       if (contact?.id) {
-        // Update contact with typeform-booked tag AND phone
         await updateGHLContact(contact.id, {
           tags: ['typeform-lead', 'typeform-booked', `${tier}-lead`],
           phone: phone || undefined,
@@ -369,6 +405,9 @@ router.post('/webhook', async (req, res) => {
         if (!existing) {
           await createGHLOpportunity(contact, process.env.GHL_PIPELINE_BOOKED_STAGE_ID, tierData);
         }
+
+        // Add form answers as note to GHL
+        await addGHLNote(contact.id, noteText);
       }
 
       if (calendlyValue) {
@@ -383,6 +422,9 @@ router.post('/webhook', async (req, res) => {
       if (!isDuplicateEmail(email) && contact?.id) {
         if (phone) await updateGHLContact(contact.id, { phone });
         await createGHLOpportunity(contact, process.env.GHL_PIPELINE_STAGE_ID, tierData);
+
+        // Add form answers as note to GHL
+        await addGHLNote(contact.id, noteText);
 
         const title = `${prefix} New Lead - ${label}`;
         const embed = createEmbed(title, discordFields, color);
