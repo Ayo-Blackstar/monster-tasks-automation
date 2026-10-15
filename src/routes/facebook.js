@@ -113,7 +113,7 @@ async function handleLead(ev) {
       const form = await graphGet(`${formId}`, 'name');
       formName = form.name || '';
     } catch (e) {
-      console.warn('[facebook] Could not fetch form name:', e.message);
+      console.log('[facebook] Form name not available (optional) — continuing');
     }
   }
 
@@ -245,6 +245,23 @@ async function upsertGhlContact(contact, revenue, tier, formName) {
     body.customFields = [{ id: process.env.GHL_FIELD_MONTHLY_REVENUE, value: revenue }];
   }
 
+  let { r, data } = await ghlUpsert(body);
+
+  // If GHL rejects the phone format, retry without it so the contact still gets the answers
+  if (!r.ok && body.phone && /phone/i.test(JSON.stringify(data))) {
+    console.warn(`[facebook] GHL rejected phone "${body.phone}" — retrying without phone`);
+    delete body.phone;
+    if (body.email) ({ r, data } = await ghlUpsert(body));
+  }
+
+  if (!r.ok) throw new Error(`GHL ${r.status}: ${JSON.stringify(data)}`);
+
+  const id = (data.contact && data.contact.id) || data.id || null;
+  console.log(`[facebook] GHL contact ${data.new ? 'created' : 'updated'}: ${id}`);
+  return id;
+}
+
+async function ghlUpsert(body) {
   const r = await fetch(`${GHL_BASE}/contacts/upsert`, {
     method: 'POST',
     headers: {
@@ -255,13 +272,8 @@ async function upsertGhlContact(contact, revenue, tier, formName) {
     },
     body: JSON.stringify(body),
   });
-
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`GHL ${r.status}: ${JSON.stringify(data)}`);
-
-  const id = (data.contact && data.contact.id) || data.id || null;
-  console.log(`[facebook] GHL contact ${data.new ? 'created' : 'updated'}: ${id}`);
-  return id;
+  return { r, data };
 }
 
 // ---------- Discord
