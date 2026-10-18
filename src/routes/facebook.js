@@ -119,7 +119,7 @@ async function handleLead(ev) {
 
   const contact = extractContact(answers);
   const revenue = findRevenue(answers);
-  const tier = getTier(revenue);
+  const tier = getTier(revenue, answers);
 
   console.log(`[facebook] Lead ${leadId} — ${contact.fullName || contact.email} — revenue: ${revenue || 'n/a'} — ${tier}`);
 
@@ -196,9 +196,13 @@ function findRevenue(answers) {
 }
 
 // Gold $50k+, Green $10k–$50k, Blue below $10k
-function getTier(revenueText) {
+// "I don't have a business" = Blue regardless of revenue
+function getTier(revenueText, answers = []) {
+  const noBusiness = answers.some((a) => /(don.?t|do not) have a business|no business/i.test(a.value || ''));
+  if (noBusiness) return 'BLUE';
+
   if (!revenueText) return 'BLUE';
-  const t = revenueText.toLowerCase().replace(/,/g, '');
+  const t = revenueText.toLowerCase().replace(/[$,]/g, '').replace(/\/\s*(m|mo|month)\b/g, '');
 
   if (/(under|less than|below|<)/.test(t)) {
     const n = parseAmount(t);
@@ -206,21 +210,25 @@ function getTier(revenueText) {
     return 'BLUE';
   }
 
-  const n = parseAmount(t); // first number = lower bound of a range
+  const n = parseAmount(t); // lower bound of a range
   if (n === null) return 'BLUE';
   if (n >= 50000) return 'GOLD';
   if (n >= 10000) return 'GREEN';
   return 'BLUE';
 }
 
+const UNIT = { k: 1e3, thousand: 1e3, m: 1e6, million: 1e6 };
+
 function parseAmount(t) {
-  const m = t.match(/(\d+(?:\.\d+)?)\s*(k|m|million|thousand)?/);
+  // Range like "10-49k" or "10k - 49k" — the unit on either side applies to the lower bound
+  const range = t.match(/(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?/);
+  if (range) {
+    const unit = range[2] || range[4];
+    return parseFloat(range[1]) * (unit ? UNIT[unit] : 1);
+  }
+  const m = t.match(/(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?/);
   if (!m) return null;
-  let n = parseFloat(m[1]);
-  const unit = m[2];
-  if (unit === 'k' || unit === 'thousand') n *= 1000;
-  if (unit === 'm' || unit === 'million') n *= 1000000;
-  return n;
+  return parseFloat(m[1]) * (m[2] ? UNIT[m[2]] : 1);
 }
 
 // ---------- GHL
@@ -238,7 +246,8 @@ async function upsertGhlContact(contact, revenue, tier, formName) {
     phone: contact.phone || undefined,
     companyName: contact.company || undefined,
     source: formName ? `Facebook Lead Form - ${formName}` : 'Facebook Lead Form',
-    tags: ['facebook-lead', `fb-${tier.toLowerCase()}`],
+    // Same tier tags as typeform.js so ghl.js colours booked calls correctly
+    tags: ['facebook-lead', `${tier.toLowerCase()}-lead`],
   };
 
   if (revenue && process.env.GHL_FIELD_MONTHLY_REVENUE) {
