@@ -56,8 +56,26 @@ function isCalendlyBookingUrl(value) {
   return value && value.includes('calendly.com') && value.includes('invitees');
 }
 
+// Turns a revenue answer into a number (lower end of the range)
+// "Under $10k/m" -> 0, "$10-49k/m" -> 10000, "$50-99k/m" -> 50000, "$100k+/m" -> 100000
+const UNIT = { k: 1e3, thousand: 1e3, m: 1e6, million: 1e6 };
+function parseRevenue(text) {
+  if (!text) return 0;
+  const t = text.toLowerCase().replace(/[$,]/g, '').replace(/\/\s*(m|mo|month)\b/g, '');
+  if (/(under|less than|below|<)/.test(t)) return 0;
+  const range = t.match(/(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?/);
+  if (range) {
+    const unit = range[2] || range[4];
+    return parseFloat(range[1]) * (unit ? UNIT[unit] : 1);
+  }
+  const m = t.match(/(\d+(?:\.\d+)?)\s*(k|m|thousand|million)?/);
+  if (!m) return 0;
+  return parseFloat(m[1]) * (m[2] ? UNIT[m[2]] : 1);
+}
+
 function determineLeadTier(answers, fields_def) {
   let revenueValue = 0;
+  let noBusiness = false;
   let firstName = '';
   let lastName = '';
   let email = '';
@@ -97,27 +115,12 @@ function determineLeadTier(answers, fields_def) {
       fieldTitle.includes('monthly business')
     ) {
       monthlyRevenue = value;
+      revenueValue = parseRevenue(value);
+    }
 
-      if (
-        valueLower.includes('$100k+') || valueLower.includes('100k+') ||
-        valueLower.includes('100k') || valueLower.includes('$100')
-      ) {
-        revenueValue = 100000;
-      } else if (
-        valueLower.includes('$50-99') || valueLower.includes('50-99k') ||
-        valueLower.includes('50k')
-      ) {
-        revenueValue = 50000;
-      } else if (
-        valueLower.includes('$10-40') || valueLower.includes('10-40k') ||
-        valueLower.includes('10k')
-      ) {
-        revenueValue = 10000;
-      } else if (
-        valueLower.includes('under $10') || valueLower.includes('under $10k')
-      ) {
-        revenueValue = 0;
-      }
+    // "I don't have a business" = not qualified, whatever the revenue answer
+    if (/(don.?t|do not) have a business|no business/i.test(valueLower)) {
+      noBusiness = true;
     }
 
     if (fieldTitle.includes('problems') || fieldTitle.includes('bottlenecks')) {
@@ -126,6 +129,10 @@ function determineLeadTier(answers, fields_def) {
       }
     }
   });
+
+  // Tiers: Gold $50k+/m, Green $10-49k/m, Blue under $10k/m or no business.
+  // Time in business does not affect the tier.
+  if (noBusiness) revenueValue = 0;
 
   if (revenueValue >= 50000) {
     return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
@@ -440,3 +447,4 @@ router.post('/webhook', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._test = { determineLeadTier, parseRevenue };
