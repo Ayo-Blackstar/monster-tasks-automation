@@ -130,16 +130,19 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  // Tiers: Gold $50k+/m, Green $10-49k/m, Blue under $10k/m or no business.
+  // Tiers (confirmed by Ayo):
+  //   Gold  = $50k+/m
+  //   Green = any other revenue, including Under $10k/m
+  //   Blue  = "I don't have a business" only
   // Time in business does not affect the tier.
-  if (noBusiness) revenueValue = 0;
+  if (noBusiness) {
+    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+  }
 
   if (revenueValue >= 50000) {
     return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
-  } else if (revenueValue >= 10000) {
-    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   } else {
-    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
   }
 }
 
