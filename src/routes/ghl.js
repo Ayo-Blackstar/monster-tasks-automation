@@ -27,15 +27,28 @@ function getContactGHLLink(contactId) {
   return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contactId}`;
 }
 
+// Colour = lead tier (from the gold-lead / green-lead / blue-lead tag)
+// Label  = who booked: SELF-BOOKED only if the lead booked through the Typeform (typeform-booked tag),
+//          otherwise a setter booked it
 function determineLeadColor(body) {
   const tags = (body.tags || '').toLowerCase();
 
-  if (tags.includes('gold-lead')) {
-    return { color: COLORS.GOLD, prefix: '🥇', label: 'QUALIFIED' };
-  } else if (tags.includes('green-lead') || tags.includes('typeform-lead')) {
-    return { color: COLORS.GREEN, prefix: '🟢', label: 'SELF-BOOKED' };
-  }
-  return { color: COLORS.BLUE, prefix: '📞', label: 'SETTER-BOOKED' };
+  let tier;
+  if (tags.includes('gold-lead')) tier = { color: COLORS.GOLD, prefix: '🥇', tierLabel: 'PREMIUM' };
+  else if (tags.includes('green-lead')) tier = { color: COLORS.GREEN, prefix: '🟢', tierLabel: 'QUALIFIED' };
+  else tier = { color: COLORS.BLUE, prefix: '📞', tierLabel: 'UNQUALIFIED' };
+
+  const bookedBy = tags.includes('typeform-booked') ? 'SELF-BOOKED' : 'SETTER-BOOKED';
+
+  return { color: tier.color, prefix: tier.prefix, label: `${bookedBy} - ${tier.tierLabel}` };
+}
+
+// Facebook Lead Form leads are posted by routes/facebook.js (with revenue + tier).
+// Once FB_LEADS_VIA_RAILWAY=true is set in Railway, skip the plain GHL "New Lead" post for them.
+function isFacebookLead(body) {
+  const tags = (body.tags || '').toLowerCase();
+  const source = (body.contact_source || '').toLowerCase();
+  return tags.includes('facebook-lead') || tags.includes('meta - ') || source.includes('facebook');
 }
 
 async function fetchGHLContact(contactId) {
@@ -170,6 +183,11 @@ router.post('/new-lead', async (req, res) => {
 
     const fullContact = contactId ? await fetchGHLContact(contactId) : null;
     const mergedBody = mergeContactData(req.body, fullContact);
+
+    if (process.env.FB_LEADS_VIA_RAILWAY === 'true' && isFacebookLead(mergedBody)) {
+      console.log('New lead skipped (Facebook lead handled by /facebook/webhook):', contactId);
+      return res.json({ success: true, skipped: 'facebook lead' });
+    }
 
     const embed = createEmbed('🆕 New Lead', buildNewLeadFields(mergedBody), COLORS.BLUE);
     await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, embed);
@@ -324,3 +342,4 @@ router.post('/closed-deal', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._test = { determineLeadColor, isFacebookLead };
