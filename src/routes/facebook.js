@@ -195,26 +195,20 @@ function findRevenue(answers) {
   return hit ? hit.value.trim() : '';
 }
 
-// Gold $50k+, Green $10k–$50k, Blue below $10k
-// "I don't have a business" = Blue regardless of revenue
+// Tiers (confirmed by Ayo):
+//   GOLD  = $50k+/m
+//   GREEN = any other revenue, including Under $10k/m
+//   BLUE  = "I don't have a business" only
 function getTier(revenueText, answers = []) {
   const noBusiness = answers.some((a) => /(don.?t|do not) have a business|no business/i.test(a.value || ''));
   if (noBusiness) return 'BLUE';
 
-  if (!revenueText) return 'BLUE';
-  const t = revenueText.toLowerCase().replace(/[$,]/g, '').replace(/\/\s*(m|mo|month)\b/g, '');
-
-  if (/(under|less than|below|<)/.test(t)) {
-    const n = parseAmount(t);
-    if (n !== null && n > 50000) return 'GREEN';
-    return 'BLUE';
-  }
+  const t = (revenueText || '').toLowerCase().replace(/[$,]/g, '').replace(/\/\s*(m|mo|month)\b/g, '');
+  if (!t || /(under|less than|below|<)/.test(t)) return 'GREEN';
 
   const n = parseAmount(t); // lower bound of a range
-  if (n === null) return 'BLUE';
-  if (n >= 50000) return 'GOLD';
-  if (n >= 10000) return 'GREEN';
-  return 'BLUE';
+  if (n !== null && n >= 50000) return 'GOLD';
+  return 'GREEN';
 }
 
 const UNIT = { k: 1e3, thousand: 1e3, m: 1e6, million: 1e6 };
