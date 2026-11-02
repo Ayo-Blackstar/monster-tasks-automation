@@ -1,6 +1,7 @@
 // src/routes/webinar.js
 // Monster Tasks — Webinar registrations → Discord new-leads channel
-// Shows ONLY: name (linked to GHL), email, phone, webinar, and the UTMs.
+// Shows ONLY: name (linked to GHL), email, phone, webinar, qualification answer, and the UTMs.
+// Custom Data key for the qualification answer: qualification
 //
 // Called by the GHL workflow "[Webinar] MT Registration" (Webhook action, POST):
 //   https://monster-tasks-automation-production.up.railway.app/webinar/registration
@@ -72,6 +73,8 @@ function buildFields(body = {}) {
   const email = firstValue(custom.email, body.email);
   const phone = firstValue(custom.phone, body.phone);
   const webinar = firstValue(custom.webinar, body.webinar);
+  // "Which best describes you right now?" — sent as Custom Data key "qualification"
+  const qualification = firstValue(custom.qualification, body.qualification);
 
   const name = fullName || email || 'Unknown';
   const nameValue = contactId
@@ -85,6 +88,7 @@ function buildFields(body = {}) {
   if (email) fields.push({ name: 'Email', value: email, inline: true });
   if (phone) fields.push({ name: 'Phone', value: phone, inline: true });
   if (webinar) fields.push({ name: 'Webinar', value: webinar, inline: true });
+  if (qualification) fields.push({ name: 'Which best describes you right now?', value: qualification.slice(0, 1024), inline: false });
 
   const utmLines = UTMS.map(([snake, camel]) => {
     const val = firstValue(custom[snake], body[snake], ...attrSources.map((a) => a[camel]), ...attrSources.map((a) => a[snake]));
