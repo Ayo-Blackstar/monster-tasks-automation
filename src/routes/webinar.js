@@ -1,13 +1,14 @@
 // src/routes/webinar.js
-// Monster Tasks — Webinar registrations → Discord new-leads channel (with UTM attribution)
+// Monster Tasks — Webinar registrations → Discord new-leads channel
+// Shows ONLY: name (linked to GHL), email, phone, webinar, and the UTMs.
 //
 // Called by the GHL workflow "[Webinar] MT Registration" (Webhook action, POST):
 //   https://monster-tasks-automation-production.up.railway.app/webinar/registration
 //
-// Send these as Custom Data from the GHL Webhook action (any you leave out are skipped):
-//   contact_id, first_name, last_name, full_name, email, phone, company, webinar
-//   utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_id, fbclid, gclid
-// Any other key you add is also shown in the notification.
+// UTMs are read from (first one that has a value wins):
+//   1. Custom Data on the GHL Webhook action (utm_source, utm_medium, ...) → arrives in body.customData
+//   2. Top-level keys (utm_source, ...)
+//   3. GHL's own attribution on the contact (attributionSource / lastAttributionSource)
 //
 // Railway env vars used: DISCORD_WEBHOOK_NEW_LEADS, GHL_LOCATION_ID
 
@@ -29,26 +30,50 @@ function isDuplicate(key) {
   return false;
 }
 
-const CONTACT_KEYS = ['contact_id', 'contactid', 'first_name', 'last_name', 'full_name', 'name', 'email', 'phone', 'company', 'company_name', 'webinar', 'webinar_name'];
-const ATTRIBUTION_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id', 'fbclid', 'gclid'];
-
 // GHL sends "{{...}}" literally, or an empty string, when a merge field has no value
 function clean(v) {
-  if (v === undefined || v === null) return '';
+  if (v === undefined || v === null || typeof v === 'object') return '';
   const s = String(v).trim();
   if (!s || /^\{\{.*\}\}$/.test(s) || s === 'null' || s === 'undefined') return '';
   return s;
 }
 
-function buildFields(body) {
-  const b = {};
-  for (const [k, v] of Object.entries(body || {})) {
+function firstValue(...vals) {
+  for (const v of vals) {
     const c = clean(v);
-    if (c) b[k.toLowerCase()] = c;
+    if (c) return c;
   }
+  return '';
+}
 
-  const contactId = b.contact_id || b.contactid || '';
-  const name = b.full_name || b.name || `${b.first_name || ''} ${b.last_name || ''}`.trim() || b.email || 'Unknown';
+// Each UTM: snake_case key (custom data) + camelCase key (GHL attribution)
+const UTMS = [
+  ['utm_source', 'utmSource'],
+  ['utm_medium', 'utmMedium'],
+  ['utm_campaign', 'utmCampaign'],
+  ['utm_content', 'utmContent'],
+  ['utm_term', 'utmTerm'],
+];
+
+function buildFields(body = {}) {
+  const custom = (body.customData && typeof body.customData === 'object') ? body.customData : {};
+  const contactObj = (body.contact && typeof body.contact === 'object') ? body.contact : {};
+  const attrSources = [
+    body.attributionSource,
+    contactObj.attributionSource,
+    body.lastAttributionSource,
+    contactObj.lastAttributionSource,
+  ].filter((a) => a && typeof a === 'object');
+
+  const contactId = firstValue(custom.contact_id, body.contact_id, contactObj.id);
+  const firstName = firstValue(custom.first_name, body.first_name);
+  const lastName = firstValue(custom.last_name, body.last_name);
+  const fullName = firstValue(custom.full_name, body.full_name, `${firstName} ${lastName}`.trim());
+  const email = firstValue(custom.email, body.email);
+  const phone = firstValue(custom.phone, body.phone);
+  const webinar = firstValue(custom.webinar, body.webinar);
+
+  const name = fullName || email || 'Unknown';
   const nameValue = contactId
     ? `[${name}](https://app.gohighlevel.com/v2/location/${process.env.GHL_LOCATION_ID}/contacts/detail/${contactId})`
     : name;
@@ -57,26 +82,18 @@ function buildFields(body) {
     { name: 'Time', value: new Date().toLocaleDateString('en-GB'), inline: true },
     { name: 'Contact', value: nameValue, inline: true },
   ];
-  if (b.webinar || b.webinar_name) fields.push({ name: 'Webinar', value: b.webinar || b.webinar_name, inline: true });
-  if (b.email) fields.push({ name: 'Email', value: b.email, inline: true });
-  if (b.phone) fields.push({ name: 'Phone', value: b.phone, inline: true });
-  if (b.company || b.company_name) fields.push({ name: 'Company', value: b.company || b.company_name, inline: true });
+  if (email) fields.push({ name: 'Email', value: email, inline: true });
+  if (phone) fields.push({ name: 'Phone', value: phone, inline: true });
+  if (webinar) fields.push({ name: 'Webinar', value: webinar, inline: true });
 
-  // Any extra answers the workflow sends
-  for (const [k, v] of Object.entries(b)) {
-    if (CONTACT_KEYS.includes(k) || ATTRIBUTION_KEYS.includes(k) || k.startsWith('utm_')) continue;
-    const label = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    fields.push({ name: label.slice(0, 256), value: v.slice(0, 1024), inline: true });
-  }
+  const utmLines = UTMS.map(([snake, camel]) => {
+    const val = firstValue(custom[snake], body[snake], ...attrSources.map((a) => a[camel]), ...attrSources.map((a) => a[snake]));
+    return val ? `**${snake}:** ${val}` : '';
+  }).filter(Boolean).join('\n');
 
-  // UTM attribution, same format as the Typeform notifications
-  const utmLines = Object.entries(b)
-    .filter(([k]) => ATTRIBUTION_KEYS.includes(k) || k.startsWith('utm_'))
-    .map(([k, v]) => `**${k}:** ${v}`)
-    .join('\n');
   fields.push({ name: 'ATTRIBUTION', value: utmLines || 'No UTM data', inline: false });
 
-  return { fields: fields.slice(0, 25), email: b.email, contactId };
+  return { fields, email, contactId };
 }
 
 router.post('/registration', async (req, res) => {
