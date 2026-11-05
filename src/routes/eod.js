@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { sendDiscordMessage, createEmbed, COLORS } = require('../utils/discord');
+const { sendDiscordMessage, COLORS } = require('../utils/discord');
+
+// Safety filters (added after old BSM rows were re-sent in one batch):
+//   1. Header rows are skipped (submitted_at = "Timestamp", or answers that just repeat the questions)
+//   2. Old submissions are skipped: anything submitted more than EOD_MAX_AGE_HOURS ago (default 48)
+//   3. The exact same submission is only posted once (per form + timestamp + answers), for 7 days
+const MAX_AGE_HOURS = () => Number(process.env.EOD_MAX_AGE_HOURS) || 48;
+const seen = new Map();
+const SEEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getEmbedConfig(formTitle) {
   const title = formTitle.toLowerCase();
@@ -31,12 +39,54 @@ function getWebhookUrl(channel) {
   }
 }
 
+// Header row = timestamp says "Timestamp", or most answers are just the question repeated
+function isHeaderRow(submittedAt, answers) {
+  if (String(submittedAt).trim().toLowerCase() === 'timestamp') return true;
+  const entries = Object.entries(answers);
+  if (!entries.length) return false;
+  const repeats = entries.filter(([q, a]) => String(a || '').trim().toLowerCase() === String(q).trim().toLowerCase()).length;
+  return repeats / entries.length >= 0.5;
+}
+
+// True if submitted_at can be read as a date and is older than the allowed age
+function isTooOld(submittedAt) {
+  if (!submittedAt) return false;
+  const t = new Date(submittedAt).getTime();
+  if (isNaN(t)) return false; // can't read the date — let it through
+  return Date.now() - t > MAX_AGE_HOURS() * 60 * 60 * 1000;
+}
+
+function isRepeat(formTitle, submittedAt, answers) {
+  const key = `${formTitle}|${submittedAt}|${JSON.stringify(answers)}`;
+  const now = Date.now();
+  for (const [k, t] of seen.entries()) {
+    if (now - t > SEEN_WINDOW_MS) seen.delete(k);
+  }
+  if (seen.has(key)) return true;
+  seen.set(key, now);
+  return false;
+}
+
 router.post('/webhook', async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = req.body || {};
     const formTitle = payload.form_title || 'EOD Report';
-    const submittedAt = payload.submitted_at || new Date().toLocaleString();
+    const rawSubmittedAt = payload.submitted_at || '';
+    const submittedAt = rawSubmittedAt || new Date().toLocaleString();
     const answers = payload.answers || {};
+
+    if (isHeaderRow(rawSubmittedAt, answers)) {
+      console.log(`[eod] Header row skipped: ${formTitle}`);
+      return res.json({ success: true, skipped: 'header row' });
+    }
+    if (isTooOld(rawSubmittedAt)) {
+      console.log(`[eod] Old submission skipped: ${formTitle} — submitted ${rawSubmittedAt}`);
+      return res.json({ success: true, skipped: 'older than ' + MAX_AGE_HOURS() + 'h' });
+    }
+    if (isRepeat(formTitle, rawSubmittedAt, answers)) {
+      console.log(`[eod] Repeat submission skipped: ${formTitle} — ${rawSubmittedAt}`);
+      return res.json({ success: true, skipped: 'already posted' });
+    }
 
     const config = getEmbedConfig(formTitle);
 
@@ -57,6 +107,7 @@ router.post('/webhook', async (req, res) => {
 
     const webhookUrl = getWebhookUrl(config.channel);
     await sendDiscordMessage(webhookUrl, embed);
+    console.log(`[eod] Posted: ${formTitle} — ${submittedAt}`);
 
     res.json({ success: true });
   } catch (err) {
@@ -66,3 +117,4 @@ router.post('/webhook', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._test = { isHeaderRow, isTooOld };
