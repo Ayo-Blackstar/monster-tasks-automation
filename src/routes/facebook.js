@@ -203,12 +203,15 @@ function getTier(revenueText, answers = []) {
   const noBusiness = answers.some((a) => /(don.?t|do not) have a business|no business/i.test(a.value || ''));
   if (noBusiness) return 'BLUE';
 
+  // STANDARD = Under $10k/m (or no revenue answer) → normal blue, no tier label (Ayo, Nov 7)
   const t = (revenueText || '').toLowerCase().replace(/[$,]/g, '').replace(/\/\s*(m|mo|month)\b/g, '');
-  if (!t || /(under|less than|below|<)/.test(t)) return 'GREEN';
+  if (!t || /(under|less than|below|<)/.test(t)) return 'STANDARD';
 
   const n = parseAmount(t); // lower bound of a range
-  if (n !== null && n >= 50000) return 'GOLD';
-  return 'GREEN';
+  if (n === null) return 'STANDARD';
+  if (n >= 50000) return 'GOLD';
+  if (n >= 10000) return 'GREEN';
+  return 'STANDARD';
 }
 
 const UNIT = { k: 1e3, thousand: 1e3, m: 1e6, million: 1e6 };
@@ -287,15 +290,16 @@ async function sendDiscord({ contact, answers, revenue, tier, formName, lead, gh
     return;
   }
 
-  const tierLabel = { GOLD: '🥇 GOLD', GREEN: '🟢 GREEN', BLUE: '🔵 BLUE' }[tier];
+  // STANDARD (Under $10k/m) gets no tier label
+  const tierLabel = { GOLD: '🥇 PREMIUM', GREEN: '🟢 QUALIFIED', BLUE: '📞 UNQUALIFIED' }[tier];
 
   const fields = [
     { name: 'Name', value: contact.fullName || '—', inline: true },
     { name: 'Email', value: contact.email || '—', inline: true },
     { name: 'Phone', value: contact.phone || '—', inline: true },
     { name: 'Monthly Revenue', value: revenue || 'Not answered', inline: true },
-    { name: 'Tier', value: tierLabel, inline: true },
   ];
+  if (tierLabel) fields.push({ name: 'Tier', value: tierLabel, inline: true });
 
   const extra = answers.filter(
     (a) => !STANDARD_FIELDS.includes(a.name.toLowerCase()) && !a.name.toLowerCase().includes(REVENUE_KEYWORD)
@@ -320,7 +324,7 @@ async function sendDiscord({ contact, answers, revenue, tier, formName, lead, gh
     embeds: [
       {
         title: '📥 New Lead — Facebook Lead Form',
-        color: COLORS[tier],
+        color: COLORS[tier] || COLORS.BLUE,
         fields: fields.slice(0, 25),
         timestamp: lead.created_time ? new Date(lead.created_time).toISOString() : new Date().toISOString(),
       },
