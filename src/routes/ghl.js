@@ -33,14 +33,17 @@ function getContactGHLLink(contactId) {
 function determineLeadColor(body) {
   const tags = (body.tags || '').toLowerCase();
 
+  // standard-lead = Under $10k/m → normal blue with no tier label (Ayo, Nov 7)
   let tier;
   if (tags.includes('gold-lead')) tier = { color: COLORS.GOLD, prefix: '🥇', tierLabel: 'PREMIUM' };
   else if (tags.includes('green-lead')) tier = { color: COLORS.GREEN, prefix: '🟢', tierLabel: 'QUALIFIED' };
-  else tier = { color: COLORS.BLUE, prefix: '📞', tierLabel: 'UNQUALIFIED' };
+  else if (tags.includes('standard-lead')) tier = { color: COLORS.BLUE, prefix: '📞', tierLabel: '' };
+  else if (tags.includes('blue-lead')) tier = { color: COLORS.BLUE, prefix: '📞', tierLabel: 'UNQUALIFIED' };
+  else tier = { color: COLORS.BLUE, prefix: '📞', tierLabel: '' };
 
   const bookedBy = tags.includes('typeform-booked') ? 'SELF-BOOKED' : 'SETTER-BOOKED';
 
-  return { color: tier.color, prefix: tier.prefix, label: `${bookedBy} - ${tier.tierLabel}` };
+  return { color: tier.color, prefix: tier.prefix, label: tier.tierLabel ? `${bookedBy} - ${tier.tierLabel}` : bookedBy };
 }
 
 // Facebook Lead Form leads are posted by routes/facebook.js (with revenue + tier).
