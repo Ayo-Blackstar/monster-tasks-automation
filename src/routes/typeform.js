@@ -130,20 +130,24 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  // Tiers (confirmed by Ayo):
-  //   Gold  = $50k+/m
-  //   Green = any other revenue, including Under $10k/m
-  //   Blue  = "I don't have a business" only
+  // Tiers (confirmed by Ayo, Nov 7):
+  //   Gold     = $50k+/m                     → 🥇 PREMIUM
+  //   Green    = $10k-49k/m                  → 🟢 QUALIFIED
+  //   Standard = Under $10k/m                → 📞 normal blue, NO label
+  //   Blue     = "I don't have a business"   → 📞 UNQUALIFIED
   // Time in business does not affect the tier.
-  if (noBusiness) {
-    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
-  }
+  const rest = { firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
 
-  if (revenueValue >= 50000) {
-    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
-  } else {
-    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+  if (noBusiness) {
+    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', ...rest };
   }
+  if (revenueValue >= 50000) {
+    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', ...rest };
+  }
+  if (revenueValue >= 10000) {
+    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', ...rest };
+  }
+  return { tier: 'standard', color: COLORS.BLUE, prefix: '📞', label: '', opportunityValue: 1997, source: 'standard', ...rest };
 }
 
 async function createGHLContact(contactData) {
@@ -424,7 +428,7 @@ router.post('/webhook', async (req, res) => {
         discordFields.push({ name: 'Call Booking', value: String(calendlyValue).substring(0, 1024), inline: true });
       }
 
-      const title = `${prefix} New Call Booked - ${label}`;
+      const title = label ? `${prefix} New Call Booked - ${label}` : `${prefix} New Call Booked`;
       const embed = createEmbed(title, discordFields, color);
       await sendDiscordMessage(process.env.DISCORD_WEBHOOK_BOOKED_CALLS, embed);
 
@@ -436,7 +440,7 @@ router.post('/webhook', async (req, res) => {
         // Add form answers as note to GHL
         await addGHLNote(contact.id, noteText);
 
-        const title = `${prefix} New Lead - ${label}`;
+        const title = label ? `${prefix} New Lead - ${label}` : `${prefix} New Lead`;
         const embed = createEmbed(title, discordFields, color);
         await sendDiscordMessage(process.env.DISCORD_WEBHOOK_NEW_LEADS, embed);
       }
