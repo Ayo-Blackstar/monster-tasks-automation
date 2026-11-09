@@ -39,6 +39,7 @@ function abbreviateTitle(title) {
     'what is your monthly revenue': 'Monthly Revenue',
     'how long have you been in business': 'Time in Business',
     'the investment': 'Investment',
+    'credit score': 'Credit Score',
     'what are your current problems': 'Problems & Bottlenecks',
     'now book in a time': 'Call Booking',
     'what type of business': 'Business Type',
@@ -73,9 +74,41 @@ function parseRevenue(text) {
   return parseFloat(m[1]) * (m[2] ? UNIT[m[2]] : 1);
 }
 
+// Find the question for an answer by its field ID (not its position).
+// With conditional logic, skipped questions are missing from `answers`,
+// so matching by position would pair answers with the wrong questions.
+function getFieldDef(answer, index, fields_def) {
+  const id = answer?.field?.id;
+  const ref = answer?.field?.ref;
+  return (
+    fields_def.find((f) => id && f.id === id) ||
+    fields_def.find((f) => ref && f.ref === ref) ||
+    fields_def[index]
+  );
+}
+
+// "Do you have a credit score over 500?" style answers → true / false
+// Handles Yes/No, "Over 500", "500+", "600-650", "Under 500", or a plain number.
+function isCreditOver500(text) {
+  if (!text) return false;
+  const t = String(text).toLowerCase().replace(/,/g, '').trim();
+  if (/^(yes|y|true)\b/.test(t)) return true;
+  if (/^(no|n|false)\b/.test(t)) return false;
+  if (/(under|below|less than|<|lower than)/.test(t)) return false;
+  const m = t.match(/(\d{3})/);
+  if (!m) return false;
+  const n = Number(m[1]);
+  if (/(over|above|more than|\+|>)/.test(t)) return n >= 500;
+  return n > 500 || (/-|–|to/.test(t) && n >= 500);
+}
+
 function determineLeadTier(answers, fields_def) {
   let revenueValue = 0;
   let noBusiness = false;
+  let investmentYes = false;
+  let investmentAnswer = '';
+  let creditOver500 = false;
+  let creditAnswer = '';
   let firstName = '';
   let lastName = '';
   let email = '';
@@ -88,18 +121,31 @@ function determineLeadTier(answers, fields_def) {
   let businessDependency = '';
 
   answers.forEach((answer, index) => {
-    const fieldDef = fields_def[index];
+    const fieldDef = getFieldDef(answer, index, fields_def);
     const fieldTitle = (fieldDef?.title || '').toLowerCase();
     let value = '';
 
-    if (answer.type === 'choice') value = answer.choice?.label || '';
+    if (answer.type === 'choice') value = answer.choice?.label || answer.choice?.other || '';
     else if (answer.type === 'choices') value = answer.choices?.labels?.join(', ') || '';
     else if (answer.type === 'text') value = answer.text || '';
     else if (answer.type === 'email') { value = answer.email || ''; email = value; }
     else if (answer.type === 'phone_number') { value = answer.phone_number || ''; phone = value; }
-    else if (answer.type === 'number') value = String(answer.number) || '';
+    else if (answer.type === 'number') value = String(answer.number ?? '');
+    else if (answer.type === 'boolean') value = answer.boolean ? 'Yes' : 'No';
 
     const valueLower = value.toLowerCase();
+
+    // Investment question — "Yes" counts towards Green
+    if (fieldTitle.includes('invest')) {
+      investmentAnswer = value;
+      investmentYes = /^yes\b/.test(valueLower.trim());
+    }
+
+    // Credit score question — over 500 counts towards Green for Under $10k leads
+    if (fieldTitle.includes('credit')) {
+      creditAnswer = value;
+      creditOver500 = isCreditOver500(value);
+    }
 
     if (fieldTitle.includes('first name')) firstName = value;
     if (fieldTitle.includes('last name')) lastName = value;
@@ -130,24 +176,28 @@ function determineLeadTier(answers, fields_def) {
     }
   });
 
-  // Tiers (confirmed by Ayo, Nov 7):
-  //   Gold     = $50k+/m                     → 🥇 PREMIUM
-  //   Green    = $10k-49k/m                  → 🟢 QUALIFIED
-  //   Standard = Under $10k/m                → 📞 normal blue, NO label
-  //   Blue     = "I don't have a business"   → 📞 UNQUALIFIED
+  // Tiers (confirmed by Ayo, Nov 9):
+  //   Gold     = $50k+/m                                                  → 🥇 PREMIUM
+  //   Green    = Investment "Yes" AND ($10k+/m OR credit score over 500)  → 🟢 QUALIFIED
+  //   Blue     = "I don't have a business"                                → 📞 UNQUALIFIED
+  //   Standard = everyone else                                            → 📞 normal blue, NO label
+  // Leads who can't get approved for financing are filtered out by the form itself.
   // Time in business does not affect the tier.
-  const rest = { firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency };
+  const rest = { firstName, lastName, email, phone, company, monthlyRevenue, problems, teamSize, hoursPerWeek, businessDependency, investmentAnswer, creditAnswer };
 
+  let result;
   if (noBusiness) {
-    return { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', ...rest };
+    result = { tier: 'blue', color: COLORS.BLUE, prefix: '📞', label: 'UNQUALIFIED', opportunityValue: 0, source: 'unqualified', ...rest };
+  } else if (revenueValue >= 50000) {
+    result = { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', ...rest };
+  } else if (investmentYes && (revenueValue >= 10000 || creditOver500)) {
+    result = { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', ...rest };
+  } else {
+    result = { tier: 'standard', color: COLORS.BLUE, prefix: '📞', label: '', opportunityValue: 1997, source: 'standard', ...rest };
   }
-  if (revenueValue >= 50000) {
-    return { tier: 'gold', color: COLORS.GOLD, prefix: '🥇', label: 'PREMIUM', opportunityValue: 1997, source: 'premium', ...rest };
-  }
-  if (revenueValue >= 10000) {
-    return { tier: 'green', color: COLORS.GREEN, prefix: '🟢', label: 'QUALIFIED', opportunityValue: 1997, source: 'qualified', ...rest };
-  }
-  return { tier: 'standard', color: COLORS.BLUE, prefix: '📞', label: '', opportunityValue: 1997, source: 'standard', ...rest };
+
+  console.log(`[typeform] Tier ${result.tier} — revenue: "${monthlyRevenue}" (${revenueValue}), investment: "${investmentAnswer}", credit: "${creditAnswer}" (over500=${creditOver500}), noBusiness=${noBusiness}`);
+  return result;
 }
 
 async function createGHLContact(contactData) {
@@ -323,7 +373,7 @@ router.post('/webhook', async (req, res) => {
     discordFields.push({ name: 'Time', value: now, inline: true });
 
     answers.forEach((answer, index) => {
-      const fieldDef = fields_def[index];
+      const fieldDef = getFieldDef(answer, index, fields_def);
       const rawTitle = fieldDef?.title || `Question ${index + 1}`;
       const fieldTitle = abbreviateTitle(rawTitle);
       let value = '';
@@ -454,4 +504,4 @@ router.post('/webhook', async (req, res) => {
 });
 
 module.exports = router;
-module.exports._test = { determineLeadTier, parseRevenue };
+module.exports._test = { determineLeadTier, parseRevenue, isCreditOver500, getFieldDef };
