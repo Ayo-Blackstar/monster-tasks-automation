@@ -17,12 +17,14 @@ const typeformRoutes = require('./routes/typeform');
 const whopRoutes = require('./routes/whop');
 const eodRoutes = require('./routes/eod');
 const webinarRoutes = require('./routes/webinar');
+const sheetsRoutes = require('./routes/sheets');
 
 app.use('/ghl', ghlRoutes);
 app.use('/typeform', typeformRoutes);
 app.use('/whop', whopRoutes);
 app.use('/eod', eodRoutes);
-app.use('/webinar', webinarRoutes); // POST /webinar/registration
+app.use('/webinar', webinarRoutes); // POST /webinar/registration, /webinar/booked-self, /webinar/booked-setter
+app.use('/sheets', sheetsRoutes);   // POST /sheets/call-notes (Sales CRM sheet → GHL notes)
 
 app.get('/', (req, res) => {
   res.json({ status: 'Monster Tasks Automation is running' });
